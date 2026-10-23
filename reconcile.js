@@ -1,23 +1,47 @@
 // Payment reconciliation.
-//
-// Reads payments.jsonl and works out how much money we actually collected.
-// Run:  node reconcile.js
-
 const fs = require("fs");
+
+const latestByTxn = new Map();
+const lines = fs.readFileSync("payments.jsonl", "utf8").split("\n");
+
+for (const line of lines) {
+  if (!line.trim()) continue;
+
+  let event;
+  try {
+    event = JSON.parse(line);
+  } catch {
+    // Ignore lines that aren't valid JSON.
+    continue;
+  }
+
+  if (!event || typeof event !== "object" || !event.txn_id) continue;
+
+  const previous = latestByTxn.get(event.txn_id);
+
+  if (
+    !previous ||
+    new Date(event.ts).getTime() >= new Date(previous.ts).getTime()
+  ) {
+    latestByTxn.set(event.txn_id, event);
+  }
+}
 
 let total = 0;
 let count = 0;
 
-const lines = fs.readFileSync("payments.jsonl", "utf8").split("\n").filter((l) => l.length > 0);
-for (const line of lines) {
-  const event = JSON.parse(line);
+for (const event of latestByTxn.values()) {
   if (event.status === "success") {
-    total += Number(event.amount);
+    // Some amounts are strings formatted with thousands separators.
+    total += Number(String(event.amount).replace(/,/g, ""));
     count += 1;
   }
 }
 
-const expected = parseInt(fs.readFileSync("expected.txt", "utf8").trim(), 10);
+const expected = parseInt(
+  fs.readFileSync("expected.txt", "utf8").trim(),
+  10
+);
 
 if (count !== expected) {
   console.log(`Check failed: counted ${count} successful payments, expected ${expected}.`);
